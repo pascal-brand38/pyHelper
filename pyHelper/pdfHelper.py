@@ -1,3 +1,7 @@
+# MIT License
+#
+# Copyright (c) 2022 Pascal Brand
+
 from PyPDF2 import PdfReader
 
 from typing import (
