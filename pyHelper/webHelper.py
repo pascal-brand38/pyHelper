@@ -15,9 +15,12 @@ import re
 
 # look at libtidy options at http://api.html-tidy.org/tidy/tidylib_api_next/tidy_quickref.html
 def w3c_validation(text, filters=[]):
+  if filters is None:
+    filters = []
   document, errors = tidy_document(text,
     options={
-      'drop-empty-elements':0
+      'drop-empty-elements':0,    # empty span that displays icons becuase of :after and :before with content
+      'doctype': 'html5'          # do not care about html4 format specification - only html5 is stressed
     })
 
   nb_errors = 0
