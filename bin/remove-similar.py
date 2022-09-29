@@ -91,9 +91,14 @@ def add_to_list(list, root, file, remove_same):
 
 def add_to_list_dir(list, root_dir, remove_same):
     print("Scan", root_dir)
+    nb = 0
     for root, dirs, files in os.walk(root_dir):
         for file in files:
             if file_ext_is_img(file):
+                nb = nb + 1
+                if nb % 100 == 0:
+                    print('-- ', nb, ' processed')
+
                 add_to_list(list, root, file, remove_same)
 
 def remove_similar(root_dir_ref, root_dir_tofilter):
@@ -101,10 +106,13 @@ def remove_similar(root_dir_ref, root_dir_tofilter):
     add_to_list_dir(list_hashes_tofilter, root_dir_tofilter, _remove)
 
     print("Process References", root_dir_ref)
+    nb = 0
     for root, dirs, filesref in os.walk(root_dir_ref):
         for fileref in filesref:
             if file_ext_is_img(fileref):
-
+                nb = nb + 1
+                if nb % 100 == 0:
+                    print('-- ', nb, ' processed')
                 filerefname = root + "/" + fileref
                 try:
                     hashref = imagehash.phash(Image.open(filerefname))
