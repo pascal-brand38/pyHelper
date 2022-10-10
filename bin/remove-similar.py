@@ -10,21 +10,22 @@ _filterdir = 'C:/tmp/ToFilter'
 _refdir = 'E:/pictures'
 _remove = False
 _verbose = False
+_skip = 0
 _paintexe = 'C:/Program Files/paint-net/paintdotnet'
 
 fields = ('full_names')
 Entry = namedtuple('Entry', fields)
 
 def usage():
-    print('python bin/remove-similar [-h] [--remove] [--verbose]')
+    print('python bin/remove-similar [-h] [--remove] [--verbose] [--skip <nb>]')
     print('   dryrun by default. use --remove to remove similar images')
     sys.exit(2)
 
 def get_args(argv):
-    global _remove, _verbose
+    global _remove, _verbose, _skip
 
     try:
-        opts, args = getopt.getopt(argv,"h",["remove", "verbose"])
+        opts, args = getopt.getopt(argv,"h",["remove", "verbose", "skip="])
     except:
         usage()
 
@@ -33,10 +34,11 @@ def get_args(argv):
         if opt == '-h':
             usage()
         elif opt == '--remove':
-            print('OK')
             _remove = True
         elif opt == '--verbose':
             _verbose = True
+        elif opt == '--skip':
+            _skip = int(arg)
 
 
 def file_ext_is_img(filename):
@@ -113,6 +115,8 @@ def remove_similar(root_dir_ref, root_dir_tofilter):
                 nb = nb + 1
                 if nb % 100 == 0:
                     print('-- ', nb, ' processed')
+                if nb < _skip:
+                    continue
                 filerefname = root + "/" + fileref
                 try:
                     hashref = imagehash.phash(Image.open(filerefname))
@@ -129,6 +133,7 @@ def main(argv):
     print('Options are:')
     print('--verbose = ', _verbose)
     print('--remove  = ', _remove)
+    print('--skip    = ', _skip)
     print('Reference:  ', _refdir)
     print('Tofilter:   ', _filterdir)
     print()
