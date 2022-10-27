@@ -17,7 +17,7 @@ fields = ('full_names')
 Entry = namedtuple('Entry', fields)
 
 def usage():
-    print('python bin/remove-similar [-h] [--remove] [--verbose] [--skip <nb>]')
+    print('python bin/remove-similar-img.py [-h] [--remove] [--verbose] [--skip <nb>]')
     print('   dryrun by default. use --remove to remove similar images')
     sys.exit(2)
 
