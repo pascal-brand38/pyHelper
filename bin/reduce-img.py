@@ -2,6 +2,7 @@ import sys
 import getopt
 import os
 import shutil, subprocess
+from datetime import datetime
 
 # python -m pip install --upgrade pillow
 from PIL import Image, ImageOps
@@ -16,19 +17,20 @@ def usage():
   print('# or height using')
   print('   cmd --height 256')
   print('# or whole using')
-  print('   cmd --googlephoto --rotate')
+  print('   cmd --googlephoto --rotate --norafale')
   sys.exit(2)
 
 def get_args(argv):
-  global _width, _height, _googlephoto, _rotate
+  global _width, _height, _googlephoto, _rotate, _norafale
 
   _width = 0
   _height = 0
   _googlephoto = False
   _rotate = False
+  _norafale = False
 
   try:
-    opts, args = getopt.getopt(argv,"h",["width=","height=","googlephoto","rotate"])
+    opts, args = getopt.getopt(argv,"h",["width=","height=","googlephoto","rotate","norafale"])
   except:
     usage()
 
@@ -44,6 +46,8 @@ def get_args(argv):
       _googlephoto = True
     elif opt == '--rotate':
       _rotate = True
+    elif opt == '--norafale':
+      _norafale = True
 
   # check 1 and only 1 option
   nb = 0
@@ -62,6 +66,7 @@ def main(argv):
     os.mkdir(_dirresized)
 
   nb = 0
+  last_epoch = 0
   for jpg_filename in os.listdir(_dirimg):
     if jpg_filename.endswith('.jpg') or jpg_filename.endswith('.JPG'):
         nb = nb + 1
@@ -92,9 +97,19 @@ def main(argv):
         try:
           exif = image.info['exif']
           noexif = False
+          # 36867 comes from https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/datetimeoriginal.html
+          epoch = datetime.strptime(image._getexif()[36867], '%Y:%m:%d %H:%M:%S').timestamp()
         except:
           print('  no exif in ' + jpg_filename)
           noexif = True
+          epoch = 0
+
+        if (_norafale) and (epoch!=0) and (epoch-last_epoch < 2):
+          print('Skip as date acquisition too close')
+          last_epoch = epoch
+          continue
+        
+        last_epoch = epoch
 
         if (f < 1):
           try:
