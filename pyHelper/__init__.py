@@ -1,4 +1,4 @@
-from .pdfHelper import pdfHelper
+from .pdfHelper import pdfReaderHelper, pdfWriterHelper
 
 __all__ = [
     "__version__",
