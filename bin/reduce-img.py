@@ -17,7 +17,7 @@ def usage():
   print('# or height using')
   print('   cmd --height 256')
   print('# or whole using')
-  print('   cmd --googlephoto --rotate --norafale')
+  print('   cmd --googlephoto --rotate --no-rafale=1')
   sys.exit(2)
 
 def get_args(argv):
@@ -27,10 +27,10 @@ def get_args(argv):
   _height = 0
   _googlephoto = False
   _rotate = False
-  _norafale = False
+  _norafale = 0
 
   try:
-    opts, args = getopt.getopt(argv,"h",["width=","height=","googlephoto","rotate","norafale"])
+    opts, args = getopt.getopt(argv,"h",["width=","height=","googlephoto","rotate","no-rafale="])
   except:
     usage()
 
@@ -46,8 +46,8 @@ def get_args(argv):
       _googlephoto = True
     elif opt == '--rotate':
       _rotate = True
-    elif opt == '--norafale':
-      _norafale = True
+    elif opt == '--no-rafale':
+      _norafale = int(arg)
 
   # check 1 and only 1 option
   nb = 0
@@ -104,7 +104,7 @@ def main(argv):
           noexif = True
           epoch = 0
 
-        if (_norafale) and (epoch!=0) and (epoch-last_epoch < 2):
+        if (_norafale!=0) and (epoch!=0) and (epoch-last_epoch < _norafale) and (epoch>=last_epoch):
           print('Skip as date acquisition too close')
           last_epoch = epoch
           continue
