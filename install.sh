@@ -6,7 +6,7 @@
 # Must be run before install of pyHelper, as 'pip install imagehash' fails on msys2/mingw
 # due to complex compilation
 export MYSYSTEM=mingw-w64-x86_64-
-for lib in (tidy python-numpy python-pywavelets python-scipy ffmpeg)
+for lib in tidy python-numpy python-pywavelets python-scipy ffmpeg
 do
   echo install ${MYSYSTEM}${lib}
   pacman -S --noconfirm ${MYSYSTEM}${lib}
