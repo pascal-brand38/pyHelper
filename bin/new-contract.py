@@ -9,12 +9,17 @@ default is
     C:\msys64\msys2_shell.cmd -mingw64 -c 'python dev/pascal-brand38/pyHelper/bin/new-contract.py --blank-contract=mon-contrat.pdf --old-contract="$0" "--dir-contract=$1"'  "%1" "%w"
 %1 is the full filename of the old contract we right-click on
 %w is the directory  
-'''
 
-# python3 -m pip install git+https://github.com/pascal-brand38/pyHelper.git
-# mkdir -p dev/pascal-brand38
-# cd dev/pascal-brand38
-# git clone git@github.com:pascal-brand38/pyHelper.git
+
+mkdir -p dev/pascal-brand38
+cd dev/pascal-brand38
+git clone git@github.com:pascal-brand38/pyHelper.git
+git clone https://github.com/pascal-brand38/pyHelper.git
+
+source ~/dev/pascal-brand38/pyHelper/install.sh
+python3 -m pip install git+https://github.com/pascal-brand38/pyHelper.git
+
+'''
 
 import sys
 import re
