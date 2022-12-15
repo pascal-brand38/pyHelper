@@ -131,11 +131,11 @@ def get_args(argv):
         get_args._root_contract = get_args._dir_contract + '\\..\\'
     if get_args._dir_contract == "":
         # check for the contract dir given get_args._who
-        cat_name = re.sub(' /.*', '', get_args._who)
+        cat_name = re.sub('[s]+/.*', '', get_args._who)
         candidates = []
         subdirs = get_immediate_subdirectories(get_args._root_contract)
         for subdir in subdirs:
-            if re.sub(' .*', '', subdir) == cat_name:
+            if re.sub('[s]+-.*', '', subdir) == cat_name:
                 candidates = candidates + [ subdir ]
         if len(candidates) == 1:
             get_args._dir_contract = get_args._root_contract + '\\' + candidates[0]
