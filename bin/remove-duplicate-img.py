@@ -8,7 +8,7 @@ fields = ('full_names')
 Entry = namedtuple('Entry', fields)
 
 _dir_pictures = "C:/Users/pasca/Pictures"
-_dir_tofilter = "C:/Users/pasca/Desktop/DCIM"
+_dir_tofilter = "C:/tmp/tofilter"
 
 def usage():
 	print('python bin/remove-duplicate-img.py [-h] [--remove] [--nameonly]')
