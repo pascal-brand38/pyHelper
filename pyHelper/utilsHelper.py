@@ -1,3 +1,7 @@
+# MIT License
+#
+# Copyright (c) 2023 Pascal Brand
+
 import os
 import shutil
 import filecmp
