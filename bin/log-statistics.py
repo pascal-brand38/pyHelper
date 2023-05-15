@@ -136,13 +136,19 @@ def get_file_data_list(filename):
   return data_list
 
 
+all_ips_location = {}
 def get_location(ip):
   try:
-    url = 'http://ipinfo.io/' + ip + '/json'
-    response = urlopen(url)
-    return json.load(response)
+    return all_ips_location[ip]
   except:
-    return {}
+    try:
+      url = 'http://ipinfo.io/' + ip + '/json'
+      response = urlopen(url)
+      all_ips_location[ip] = json.load(response)
+      return all_ips_location[ip]
+    except:
+      all_ips_location[ip] = {}
+      return all_ips_location[ip]
 
 def in_list(exact_search, str, list, case_sensitive=True):
   if exact_search:
