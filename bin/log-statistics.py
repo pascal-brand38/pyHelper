@@ -219,6 +219,14 @@ def keep_only(data_list, exact_search, field, exclude_list):
       new_data_list.append(data)
   return new_data_list
 
+def keep_unique(data_list, exact_search, field, exclude_list):
+  unique_list = []
+  for data in data_list:
+    if (data[field] not in unique_list) and (in_list(exact_search, data[field], exclude_list)):
+      unique_list.append(data[field])
+  return unique_list
+
+
 def remove_in_list(data_list, exact_search, field, exclude_list):
   new_data_list = []
   for data in data_list:
@@ -355,10 +363,10 @@ def main(argv):
     if get_args._google:
       data_list = remove_bots(data_list)
       data_list = keep_only(data_list, False, 'request', [ '.html', 'GET / ', 'GET /?' ])
-      
-      for page_list in [ ['GET / ', 'GET /?' ], ['tarif.html'], ['conditions.html'], ['galerie-photos.html'], ['videos.html'], ['contact.html'], ['access.html'], [ 'mail-confirmation.html'] ]:
-        all = keep_only(data_list, False, 'request', page_list)
-        print(str(page_list) + ': ' + str(len(all)))
+      unique_requests = keep_unique(data_list, False, 'request', [ '.html', 'GET / ', 'GET /?' ])
+      for unique_request in unique_requests: 
+        all = keep_only(data_list, True, 'request', [ unique_request ])
+        print('========= ' + unique_request + ': ' + str(len(all)))
 
         for c in all:
           print_ip_location(c['ip'])
@@ -405,10 +413,11 @@ def main(argv):
     data_list = remove_in_list(data_list, False, 'ua', [ 'crawl', 'bot'])
 
     data_list = keep_only(data_list, False, 'request', [ '.html', 'GET / ', 'GET /?' ])
+    unique_requests = keep_unique(data_list, False, 'request', [ '.html', 'GET / ', 'GET /?' ])
     # ips_list = get_ips_list(data_list)
-    for page_list in [ ['GET / ', 'GET /?' ], ['tarif.html'], ['conditions.html'], ['galerie-photos.html'], ['videos.html'], ['contact.html'], ['access.html'], [ 'mail-confirmation.html'] ]:
-      all = keep_only(data_list, False, 'request', page_list)
-      print(str(page_list) + ': ' + str(len(all)))
+    for unique_request in unique_requests: 
+      all = keep_only(data_list, True, 'request', [ unique_request ])
+      print('========= ' + unique_request + ': ' + str(len(all)))
 
       for c in all:
         print_ip_location(c['ip'])
