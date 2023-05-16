@@ -199,12 +199,24 @@ def is_abuse(ip):
   # print(result)
   return result
 
-def filter_not_abuse(data_list):   # remove all 'abuse' connexions
+def is_crawler(ip):
+  ipdb = get_abuse_ipdb(ip)
+  result = (ipdb['data']['computed']) and (ipdb['data']['usageType'] == 'Search Engine Spider')
+  # print(result)
+  return result
+
+def filter_abuse_ipdb(callback, data_list):
   new_data_list = []
   for data in data_list:
-    if not(is_abuse(data['ip'])):
+    if not(callback(data['ip'])):
       new_data_list.append(data)
   return new_data_list
+
+def filter_not_abuse(data_list):   # remove all 'abuse' connexions
+  return filter_abuse_ipdb(is_abuse, data_list)
+
+def filter_not_crawler(data_list):   # remove all 'abuse' connexions
+  return filter_abuse_ipdb(is_crawler, data_list)
 
 
 def in_list(exact_search, str, list, case_sensitive=True):
@@ -391,6 +403,7 @@ def main(argv):
     print('================= ANALYZE ' + filename)
     data_list = get_file_data_list(filename)
     data_list = filter_not_abuse(data_list)   # remove all 'abuse' connexions
+    data_list = filter_not_crawler(data_list)   # remove all 'crawler' connexions
 
     nb_errors, total = get_number_errors(data_list)
     print('Number of errors:     ' + str(nb_errors))
