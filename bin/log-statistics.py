@@ -2,7 +2,7 @@
 #
 # Copyright (c) 2023 Pascal Brand
 
-import sys, getopt
+import sys, getopt, requests
 import json
 from urllib.request import urlopen
 
@@ -68,7 +68,8 @@ botname = [
 ]
 
 def usage():
-  print('python bin/log-statistics.py [-h] [--ip <ip>] [--check-new-bots] <file.log>')
+  print('python bin/log-statistics.py [-h] [--credential-abuse-ipdb <credential>] [--ip <ip>] [--check-new-bots] <file.log>')
+  print(' --credential-abuse-ipdb <credential>: abuseipdb.com credential to filter spammer and crawler')
   print(' --ip <ip>: print every requests about this ip')
   print(' --check-new-bots: print when a useragent may be a bot')
   print(' --backlinks: print backlinks')
@@ -80,10 +81,11 @@ def get_args(argv):
   get_args._checkerrors = False
   get_args._backlinks = False
   get_args._google = False
+  get_args._credential_abuse_ipdb = ''
   n = 0
 
   try:
-    opts, args = getopt.getopt(argv,"h", ["ip", "check-new-bots", "check-errors", "backlinks", "google"])
+    opts, args = getopt.getopt(argv,"h", ["ip", "credential-abuse-ipdb", "check-new-bots", "check-errors", "backlinks", "google"])
   except:
     usage()
 
@@ -101,6 +103,9 @@ def get_args(argv):
       get_args._backlinks = True
     elif opt == '--google':
       get_args._google = True
+    elif opt == '--credential-abuse-ipdb':
+      get_args._credential_abuse_ipdb = str(args[n])
+      n = n + 1
 
   if len(args) < n + 1:
     usage()
@@ -147,8 +152,60 @@ def get_location(ip):
       all_ips_location[ip] = json.load(response)
       return all_ips_location[ip]
     except:
-      all_ips_location[ip] = {}
+      all_ips_location[ip] = {
+        'city': '???',
+        'region': '???',
+        'country': '???',
+      }
       return all_ips_location[ip]
+
+
+abuse_ipdb = {}
+def get_abuse_ipdb(ip):
+  # cf. https://docs.abuseipdb.com/?python#check-endpoint
+  if get_args._credential_abuse_ipdb == '':
+    abuse_ipdb[ip] = { 'data': { 'computed': False } }
+    return abuse_ipdb[ip]
+
+  try:
+    return abuse_ipdb[ip]
+  except:
+    pass
+  
+  print('.', end='')
+  url = 'https://api.abuseipdb.com/api/v2/check'
+  querystring = {
+      'ipAddress': ip,
+      'maxAgeInDays': '90'
+  }
+  headers = {
+      'Accept': 'application/json',
+      'Key': get_args._credential_abuse_ipdb
+  }
+
+  try:
+    response = requests.request(method='GET', url=url, headers=headers, params=querystring)
+    decodedResponse = json.loads(response.text)
+    decodedResponse['data']['computed'] = True
+    abuse_ipdb[ip] = decodedResponse
+  except Exception as e:
+    abuse_ipdb[ip] = { 'data': { 'computed': False } }
+
+  return abuse_ipdb[ip]
+
+def is_abuse(ip):
+  ipdb = get_abuse_ipdb(ip)
+  result = (ipdb['data']['computed']) and (ipdb['data']['abuseConfidenceScore'] > 30)
+  # print(result)
+  return result
+
+def filter_not_abuse(data_list):   # remove all 'abuse' connexions
+  new_data_list = []
+  for data in data_list:
+    if not(is_abuse(data['ip'])):
+      new_data_list.append(data)
+  return new_data_list
+
 
 def in_list(exact_search, str, list, case_sensitive=True):
   if exact_search:
@@ -333,6 +390,7 @@ def main(argv):
   for filename in get_args._log_name:
     print('================= ANALYZE ' + filename)
     data_list = get_file_data_list(filename)
+    data_list = filter_not_abuse(data_list)   # remove all 'abuse' connexions
 
     nb_errors, total = get_number_errors(data_list)
     print('Number of errors:     ' + str(nb_errors))
