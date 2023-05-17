@@ -2,7 +2,7 @@
 #
 # Copyright (c) 2023 Pascal Brand
 
-import sys, getopt, requests, time
+import sys, getopt, requests, time, math
 import json
 from urllib.request import urlopen
 
@@ -84,7 +84,9 @@ def get_args(argv):
   get_args._google = False
   get_args._credential_abuse_ipdb = ''
   get_args._ip_info = ''
-  n = 0
+
+  get_args._compute_abuseipdb = False
+  get_args._epoch = math.floor(time.time())
 
   try:
     opts, args = getopt.getopt(argv,"h", ["ip=", "credential-abuse-ipdb=", "ip-info=", "check-new-bots", "check-errors", "backlinks", "google"])
@@ -106,7 +108,7 @@ def get_args(argv):
       get_args._google = True
     elif opt == '--credential-abuse-ipdb':
       get_args._credential_abuse_ipdb = arg
-      n = n + 1
+      get_args._compute_abuseipdb = True
     elif opt == '--ip-info':
       get_args._ip_info = arg
 
@@ -137,30 +139,21 @@ def parse_line(line):
 def get_file_data_list(filename):
   with open(filename, 'r') as file:
     lines = file.readlines()
-    file.close();
+    file.close()
     data_list = []
     for line in lines:
       data_list.append(parse_line(line))
   return data_list
 
 
-all_ips_location = {}
-def get_location(ip):
+def compute_location(ip):
   try:
-    return all_ips_location[ip]
+    url = 'http://ipinfo.io/' + ip + '/json'
+    response = urlopen(url)
+    return json.load(response)
   except:
-    try:
-      url = 'http://ipinfo.io/' + ip + '/json'
-      response = urlopen(url)
-      all_ips_location[ip] = json.load(response)
-      return all_ips_location[ip]
-    except:
-      all_ips_location[ip] = {
-        'city': '???',
-        'region': '???',
-        'country': '???',
-      }
-      return all_ips_location[ip]
+    print('Cannot compute location of ', ip)
+    return None
 
 ipinfo_db = {}
 def db_read(db_filename):
@@ -184,44 +177,65 @@ def db_write(db_filename, json_database):
     json.dump(json_database, file, indent=2, ensure_ascii=False)    # https://stackoverflow.com/questions/18337407/saving-utf-8-texts-with-json-dumps-as-utf-8-not-as-a-u-escape-sequence
     file.close()
 
+def compute_abuseipdb(ip):
+  if get_args._compute_abuseipdb:
+    url = 'https://api.abuseipdb.com/api/v2/check'
+    querystring = {
+        'ipAddress': ip,
+        'maxAgeInDays': '90'
+    }
+    headers = {
+        'Accept': 'application/json',
+        'Key': get_args._credential_abuse_ipdb
+    }
+
+    print('.')
+    try:
+      response = requests.request(method='GET', url=url, headers=headers, params=querystring)
+      decodedResponse = json.loads(response.text)
+      if (decodedResponse.get('data')):
+        return decodedResponse
+    except:
+      pass
+  
+  get_args._compute_abuseipdb = False
+  return None
+
+def get_ip_location(ip):
+  location = ipinfo_db[ip].get('location')
+  if not location:
+    location = compute_location(ip)
+    if (location):
+      ipinfo_db[ip]['location'] = location
+  return location
+
 def get_ipinfo_db(data):
   # cf. https://docs.abuseipdb.com/?python#check-endpoint
   ip = data['ip']
   if (ipinfo_db.get(ip)):
-    return ipinfo_db.get(ip)
+    if (ipinfo_db[ip]['epoch'] + 30*24*60*60 < get_args._epoch):
+      ipinfo_db[ip] = {}    # reset it as old information
+  else:
+      ipinfo_db[ip] = {}    # init as does not exist
 
-  ipinfo_db[ip] = {}
-  ipinfo_db[ip]['epoch'] = time.gmtime(0)
+  if ipinfo_db[ip] == {}:
+    ipinfo_db[ip]['epoch'] = get_args._epoch
+    ipinfo_db[ip]['ua'] = data['ua'].lower()
 
-  if get_args._credential_abuse_ipdb == '':
-    ipinfo_db[ip]['data'] = { 'computed': False }
-    return ipinfo_db[ip]
+  if not(ipinfo_db[ip].get('abuseipdb')):
+    abuseipdb = compute_abuseipdb(ip)
+    if (abuseipdb):
+      ipinfo_db[ip]['abuseipdb'] = abuseipdb
 
-  url = 'https://api.abuseipdb.com/api/v2/check'
-  querystring = {
-      'ipAddress': ip,
-      'maxAgeInDays': '90'
-  }
-  headers = {
-      'Accept': 'application/json',
-      'Key': get_args._credential_abuse_ipdb
-  }
-
-  print('.')
-  try:
-    response = requests.request(method='GET', url=url, headers=headers, params=querystring)
-    decodedResponse = json.loads(response.text)
-    decodedResponse['data']['computed'] = True
-    ipinfo_db[ip]['data'] = decodedResponse['data']
-  except Exception as e:
-    ipinfo_db[ip]['data'] = { 'computed': False }
+  # do not compute location systematically as not required for bots or abuse sites
 
   return ipinfo_db[ip]
 
 def is_abuse(data):
   ip = data['ip']
-  ipdb = get_ipinfo_db(data)
-  result = (ipdb['data']['computed']) and (ipdb['data']['abuseConfidenceScore'] > 30)
+  abuseipdb = get_ipinfo_db(data).get('abuseipdb')
+
+  result = abuseipdb and (abuseipdb['data']['abuseConfidenceScore'] > 30)
   # print(result)
   return result
 
@@ -229,8 +243,10 @@ crawler_french = []
 crawler_by_name = []
 def is_crawler(data):
   ip = data['ip']
-  ipdb = get_ipinfo_db(data)
-  result = (ipdb['data']['computed']) and ((ipdb['data']['usageType'] == 'Search Engine Spider') or (ipdb['data']['usageType'] == 'Data Center/Web Hosting/Transit'))
+  ip_info = get_ipinfo_db(data)
+  abuseipdb = ip_info.get('abuseipdb')
+  result = (abuseipdb) and (abuseipdb['data']['usageType'] == 'Search Engine Spider')
+  result = result or ('bot' in ip_info['ua']) or ('crawler' in ip_info['ua'])
   result2 = (in_list(False, data['ua'], botname, False) or in_list(False, data['ua'], [ 'crawl', 'bot'], False))
 
   if (result != result2):
@@ -241,8 +257,8 @@ def is_crawler(data):
     else:
       if (not is_abuse(data)) and (ip not in crawler_by_name):
         crawler_by_name.append(ip)
-        if (ip == '207.46.13.211'):
-          print(ipdb)
+        # if (ip == '207.46.13.211'):
+        #   print(ipdb)
 
   # print(result)
   return result
@@ -303,7 +319,6 @@ def filter_errors(data_list):
     if not(code_expected(data)):
       print('ERROR RETURNED: ' + str(data))
       print_ip(data, data_list)
-      #get_location(data['ip'])
     else:
       new_data_list.append(data)
   return new_data_list
@@ -316,7 +331,6 @@ def check_return_an_error(data_list, exact_search, field, exclude_list):
       if not(data['returned_code'] in [ '301', '403', '404', '410', '503' ]):
         print('EXPECTING AN ERROR ON: ' + str(data))
         ok = False
-        #get_location(data['ip'])
     else:
       new_data_list.append(data)
   # if not(ok):
@@ -386,11 +400,11 @@ def print_all_from_ip(ip, data_list):
 
 
 def print_ip_location(ip):
-    location = get_location(ip)
-    try:
-      print(ip + ': ' + location['city'] + ', ' + location['region'] + ', ' + location['country'])
-    except:
-      print(ip + ': Cannot print location')
+  try:
+    location = get_ip_location(ip)
+    print(ip + ': ' + location['city'] + ', ' + location['region'] + ', ' + location['country'])
+  except:
+    print(ip + ': Cannot print locations')
 
 
 def print_ip(data, data_list):
@@ -444,7 +458,6 @@ def main(argv):
     data_list = get_file_data_list(filename)
     data_list = filter_not_abuse(data_list)   # remove all 'abuse' connexions
     data_list = filter_not_crawler(data_list)   # remove all 'crawler' connexions
-    continue
 
     nb_errors, total = get_number_errors(data_list)
     print('Number of errors:     ' + str(nb_errors))
