@@ -2,7 +2,7 @@
 #
 # Copyright (c) 2023 Pascal Brand
 
-import sys, getopt, requests
+import sys, getopt, requests, time
 import json
 from urllib.request import urlopen
 
@@ -70,6 +70,7 @@ botname = [
 def usage():
   print('python bin/log-statistics.py [-h] [--credential-abuse-ipdb <credential>] [--ip <ip>] [--check-new-bots] <file.log>')
   print(' --credential-abuse-ipdb <credential>: abuseipdb.com credential to filter spammer and crawler')
+  print(' --ip-info <ip filename>: json db for ips info')
   print(' --ip <ip>: print every requests about this ip')
   print(' --check-new-bots: print when a useragent may be a bot')
   print(' --backlinks: print backlinks')
@@ -82,10 +83,11 @@ def get_args(argv):
   get_args._backlinks = False
   get_args._google = False
   get_args._credential_abuse_ipdb = ''
+  get_args._ip_info = ''
   n = 0
 
   try:
-    opts, args = getopt.getopt(argv,"h", ["ip", "credential-abuse-ipdb", "check-new-bots", "check-errors", "backlinks", "google"])
+    opts, args = getopt.getopt(argv,"h", ["ip=", "credential-abuse-ipdb=", "ip-info=", "check-new-bots", "check-errors", "backlinks", "google"])
   except:
     usage()
 
@@ -93,8 +95,7 @@ def get_args(argv):
     if opt == '-h':
       usage()
     elif opt == '--ip':
-      get_args._ip = str(args[n])
-      n = n + 1
+      get_args._ip = arg
     elif opt == '--check-new-bots':
       get_args._checknewbots = True
     elif opt == '--check-errors':
@@ -104,12 +105,14 @@ def get_args(argv):
     elif opt == '--google':
       get_args._google = True
     elif opt == '--credential-abuse-ipdb':
-      get_args._credential_abuse_ipdb = str(args[n])
+      get_args._credential_abuse_ipdb = arg
       n = n + 1
+    elif opt == '--ip-info':
+      get_args._ip_info = arg
 
-  if len(args) < n + 1:
+  if len(args) < 1:
     usage()
-  get_args._log_name = args[n : len(args)]
+  get_args._log_name = args
 
 
 def parse(line, end_str, start_pos):
@@ -159,20 +162,41 @@ def get_location(ip):
       }
       return all_ips_location[ip]
 
-
-abuse_ipdb = {}
-def get_abuse_ipdb(ip):
-  # cf. https://docs.abuseipdb.com/?python#check-endpoint
-  if get_args._credential_abuse_ipdb == '':
-    abuse_ipdb[ip] = { 'data': { 'computed': False } }
-    return abuse_ipdb[ip]
-
+ipinfo_db = {}
+def db_read(db_filename):
   try:
-    return abuse_ipdb[ip]
+    with open(db_filename, encoding='utf-8') as file:
+      try:
+        json_database = json.load(file)
+      except ValueError as err:
+        print(err)
+        print('Wrong json at ' + db_filename + ' - Exit')
+        exit(1)
+  except SystemExit:
+    raise
   except:
-    pass
-  
-  print('.', end='')
+    print("File " + db_filename + ' does not exist - start with empty json')
+    json_database = {}
+  return json_database
+
+def db_write(db_filename, json_database):
+  with open(db_filename, 'w', encoding='utf-8') as file:
+    json.dump(json_database, file, indent=2, ensure_ascii=False)    # https://stackoverflow.com/questions/18337407/saving-utf-8-texts-with-json-dumps-as-utf-8-not-as-a-u-escape-sequence
+    file.close()
+
+def get_ipinfo_db(data):
+  # cf. https://docs.abuseipdb.com/?python#check-endpoint
+  ip = data['ip']
+  if (ipinfo_db.get(ip)):
+    return ipinfo_db.get(ip)
+
+  ipinfo_db[ip] = {}
+  ipinfo_db[ip]['epoch'] = time.gmtime(0)
+
+  if get_args._credential_abuse_ipdb == '':
+    ipinfo_db[ip]['data'] = { 'computed': False }
+    return ipinfo_db[ip]
+
   url = 'https://api.abuseipdb.com/api/v2/check'
   querystring = {
       'ipAddress': ip,
@@ -183,40 +207,58 @@ def get_abuse_ipdb(ip):
       'Key': get_args._credential_abuse_ipdb
   }
 
+  print('.')
   try:
     response = requests.request(method='GET', url=url, headers=headers, params=querystring)
     decodedResponse = json.loads(response.text)
     decodedResponse['data']['computed'] = True
-    abuse_ipdb[ip] = decodedResponse
+    ipinfo_db[ip]['data'] = decodedResponse['data']
   except Exception as e:
-    abuse_ipdb[ip] = { 'data': { 'computed': False } }
+    ipinfo_db[ip]['data'] = { 'computed': False }
 
-  return abuse_ipdb[ip]
+  return ipinfo_db[ip]
 
-def is_abuse(ip):
-  ipdb = get_abuse_ipdb(ip)
+def is_abuse(data):
+  ip = data['ip']
+  ipdb = get_ipinfo_db(data)
   result = (ipdb['data']['computed']) and (ipdb['data']['abuseConfidenceScore'] > 30)
   # print(result)
   return result
 
-def is_crawler(ip):
-  ipdb = get_abuse_ipdb(ip)
-  result = (ipdb['data']['computed']) and (ipdb['data']['usageType'] == 'Search Engine Spider')
+crawler_french = []
+crawler_by_name = []
+def is_crawler(data):
+  ip = data['ip']
+  ipdb = get_ipinfo_db(data)
+  result = (ipdb['data']['computed']) and ((ipdb['data']['usageType'] == 'Search Engine Spider') or (ipdb['data']['usageType'] == 'Data Center/Web Hosting/Transit'))
+  result2 = (in_list(False, data['ua'], botname, False) or in_list(False, data['ua'], [ 'crawl', 'bot'], False))
+
+  if (result != result2):
+    if (result):
+      if (ipdb['data']['countryCode'] == 'FR') and (ip not in crawler_french):
+        if not 'qwant' in data['ua']:
+          crawler_french.append(ip)
+    else:
+      if (not is_abuse(data)) and (ip not in crawler_by_name):
+        crawler_by_name.append(ip)
+        if (ip == '207.46.13.211'):
+          print(ipdb)
+
   # print(result)
   return result
 
-def filter_abuse_ipdb(callback, data_list):
+def filter_ipinfo_db(callback, data_list):
   new_data_list = []
   for data in data_list:
-    if not(callback(data['ip'])):
+    if not(callback(data)):
       new_data_list.append(data)
   return new_data_list
 
 def filter_not_abuse(data_list):   # remove all 'abuse' connexions
-  return filter_abuse_ipdb(is_abuse, data_list)
+  return filter_ipinfo_db(is_abuse, data_list)
 
 def filter_not_crawler(data_list):   # remove all 'abuse' connexions
-  return filter_abuse_ipdb(is_crawler, data_list)
+  return filter_ipinfo_db(is_crawler, data_list)
 
 
 def in_list(exact_search, str, list, case_sensitive=True):
@@ -397,13 +439,12 @@ def remove_bots(data_list):
   return new_list
 
 def main(argv):
-  get_args(argv)
-
   for filename in get_args._log_name:
     print('================= ANALYZE ' + filename)
     data_list = get_file_data_list(filename)
     data_list = filter_not_abuse(data_list)   # remove all 'abuse' connexions
     data_list = filter_not_crawler(data_list)   # remove all 'crawler' connexions
+    continue
 
     nb_errors, total = get_number_errors(data_list)
     print('Number of errors:     ' + str(nb_errors))
@@ -498,8 +539,17 @@ def main(argv):
     #print_ips(data_list)
 
 
+  print('=========================== crawler_french')
+  print(crawler_french)
+  print('=========================== crawler_by_name')
+  print(crawler_by_name)
+
 if __name__ == "__main__":
+  get_args(sys.argv[1:])
+  ipinfo_db = db_read(get_args._ip_info)
   main(sys.argv[1:])
+  db_write(get_args._ip_info, ipinfo_db)
+
   #get_location('50.59.99.143')
 
 
