@@ -81,15 +81,15 @@ def get_args(argv):
   get_args._checknewbots = False
   get_args._checkerrors = False
   get_args._backlinks = False
-  get_args._google = False
   get_args._credential_abuse_ipdb = ''
   get_args._ip_info = ''
 
   get_args._compute_abuseipdb = False
+  get_args._compute_location = True
   get_args._epoch = math.floor(time.time())
 
   try:
-    opts, args = getopt.getopt(argv,"h", ["ip=", "credential-abuse-ipdb=", "ip-info=", "check-new-bots", "check-errors", "backlinks", "google"])
+    opts, args = getopt.getopt(argv,"h", ["ip=", "credential-abuse-ipdb=", "ip-info=", "check-new-bots", "check-errors", "backlinks"])
   except:
     usage()
 
@@ -104,8 +104,6 @@ def get_args(argv):
       get_args._checkerrors = True
     elif opt == '--backlinks':
       get_args._backlinks = True
-    elif opt == '--google':
-      get_args._google = True
     elif opt == '--credential-abuse-ipdb':
       get_args._credential_abuse_ipdb = arg
       get_args._compute_abuseipdb = True
@@ -145,17 +143,48 @@ def get_file_data_list(filename):
       data_list.append(parse_line(line))
   return data_list
 
-
 def compute_location(ip):
-  try:
-    url = 'http://ipinfo.io/' + ip + '/json'
-    response = urlopen(url)
-    return json.load(response)
-  except:
-    print('Cannot compute location of ', ip)
-    return None
+  if (get_args._compute_location):
+    try:
+      url = 'http://ipinfo.io/' + ip + '/json'
+      response = urlopen(url)
+      return json.load(response)
+    except:
+      get_args._compute_location = False
+  return None
 
 ipinfo_db = {}
+
+def set_ipinfo_db(data_list):
+  for data in data_list:
+    ip = data['ip']
+    if (ipinfo_db.get(ip)):
+      if (ipinfo_db[ip]['epoch'] + 365*24*60*60 < get_args._epoch):
+        ipinfo_db[ip] = {}    # reset it as old information
+    else:
+        ipinfo_db[ip] = {}    # init as does not exist
+
+    if ipinfo_db[ip] == {}:
+      ipinfo_db[ip]['epoch'] = get_args._epoch
+      ipinfo_db[ip]['ua'] = data['ua'].lower()
+
+    ua = data['ua'].lower()
+    if not ipinfo_db[ip].get('lua'):
+      ipinfo_db[ip]['lua'] = []
+    if not ua in ipinfo_db[ip]['lua']:
+      ipinfo_db[ip]['lua'].append(ua)
+
+    if not(ipinfo_db[ip].get('abuseipdb')):
+      abuseipdb = compute_abuseipdb(ip)
+      if (abuseipdb):
+        ipinfo_db[ip]['abuseipdb'] = abuseipdb
+
+
+def get_ipinfo_db(data):
+  # cf. https://docs.abuseipdb.com/?python#check-endpoint
+  ip = data['ip']
+  return ipinfo_db[ip]
+
 def db_read(db_filename):
   try:
     with open(db_filename, encoding='utf-8') as file:
@@ -209,28 +238,6 @@ def get_ip_location(ip):
       ipinfo_db[ip]['location'] = location
   return location
 
-def get_ipinfo_db(data):
-  # cf. https://docs.abuseipdb.com/?python#check-endpoint
-  ip = data['ip']
-  if (ipinfo_db.get(ip)):
-    if (ipinfo_db[ip]['epoch'] + 30*24*60*60 < get_args._epoch):
-      ipinfo_db[ip] = {}    # reset it as old information
-  else:
-      ipinfo_db[ip] = {}    # init as does not exist
-
-  if ipinfo_db[ip] == {}:
-    ipinfo_db[ip]['epoch'] = get_args._epoch
-    ipinfo_db[ip]['ua'] = data['ua'].lower()
-
-  if not(ipinfo_db[ip].get('abuseipdb')):
-    abuseipdb = compute_abuseipdb(ip)
-    if (abuseipdb):
-      ipinfo_db[ip]['abuseipdb'] = abuseipdb
-
-  # do not compute location systematically as not required for bots or abuse sites
-
-  return ipinfo_db[ip]
-
 def is_abuse(data):
   ip = data['ip']
   abuseipdb = get_ipinfo_db(data).get('abuseipdb')
@@ -242,23 +249,65 @@ def is_abuse(data):
 crawler_french = []
 crawler_by_name = []
 def is_crawler(data):
+  _static_botname = [     # TODO: remove this list
+    'bot', 'crawl',
+    'qwant',              # TODO: qwantmobile is detected, whereas it should not
+    'google-site-verification',
+    'chrome-lighthouse',
+    'exaleadcloudview',
+    'binglocalsearch',
+  ]
+
+  # TODO: check when accessing robots.txt
+  # in_list(False, data['request'], [ ' /robots.txt' ])
+
   ip = data['ip']
+  verbose = (ip == '176.180.84.55') and False
   ip_info = get_ipinfo_db(data)
   abuseipdb = ip_info.get('abuseipdb')
-  result = (abuseipdb) and (abuseipdb['data']['usageType'] == 'Search Engine Spider')
-  result = result or ('bot' in ip_info['ua']) or ('crawler' in ip_info['ua'])
-  result2 = (in_list(False, data['ua'], botname, False) or in_list(False, data['ua'], [ 'crawl', 'bot'], False))
+  result = (abuseipdb is not None) and (abuseipdb['data']['usageType'] == 'Search Engine Spider')
+  if verbose:
+    print('result = ', result)
+  # result = result or ('bot' in ip_info['ua']) or ('crawler' in ip_info['ua'])
+  if verbose:
+    print('result = ', result or ('bot' in ip_info['ua']) or ('crawler' in ip_info['ua']))
+  if not result:
+    for ua in ip_info['lua']:
+      for bot in _static_botname:
+        if bot in ua:
+          result = True
+          if verbose:
+            print('Found')
+          break
+      if result:
+        break
 
-  if (result != result2):
-    if (result):
-      if (ipdb['data']['countryCode'] == 'FR') and (ip not in crawler_french):
-        if not 'qwant' in data['ua']:
-          crawler_french.append(ip)
-    else:
-      if (not is_abuse(data)) and (ip not in crawler_by_name):
-        crawler_by_name.append(ip)
-        # if (ip == '207.46.13.211'):
-        #   print(ipdb)
+
+  # result = result or ('bot' in ip_info['ua']) or ('crawl' in ip_info['ua'])
+  result2 = in_list(False, data['ua'], botname, False)
+  if not result2:
+    result2 = in_list(False, data['ua'], [ 'crawl', 'bot'], False)
+  if not result2:
+    for bot in botname:
+      if bot in data['ua']:
+        result2 = bot
+        if verbose:
+          print('result2 found a bot: ', bot)
+        break
+  if verbose:
+    print('result2 = ', result2)
+
+  if (result and not result2):
+    if (abuseipdb and abuseipdb['data']['countryCode'] == 'FR') and (ip not in crawler_french):
+      if not 'qwant' in data['ua']:
+        crawler_french.append(ip)
+  if (not result and result2):
+    if (not is_abuse(data)) and ({ 'ip': ip, 'bot': result2 } not in crawler_by_name):
+      if verbose:
+        print('$$$$')
+      crawler_by_name.append({ 'ip': ip, 'bot': result2 })
+      # if (ip == '207.46.13.211'):
+      #   print(ipdb)
 
   # print(result)
   return result
@@ -279,15 +328,16 @@ def filter_not_crawler(data_list):   # remove all 'abuse' connexions
 
 def in_list(exact_search, str, list, case_sensitive=True):
   if exact_search:
-    return str in list
+    if str in list:
+      return str
   else:
     for item in list:
       if case_sensitive:
         if str.find(item) != -1:
-          return True
+          return str
       else:
         if str.lower().find(item) != -1:
-          return True
+          return str.lower()
     return False
 
 
@@ -417,22 +467,6 @@ def print_ip(data, data_list):
     except:
       print(data['ip'] + ': Cannot print location')
 
-def get_ips_list(data_list):
-  ips_list = []
-  for data in data_list:
-    if data['ip'] in ips_list:
-      continue
-    ips_list.append(data['ip'])
-  return ips_list
-
-def print_ips(data_list):
-  ip_list = []
-  for data in data_list:
-    if data['ip'] in ip_list:
-      continue
-    ip_list.append(data['ip'])
-    print_ip(data, data_list)
-
 
 # a bot is
 # - access robots.txt ==> remove all requests from this ip
@@ -453,6 +487,12 @@ def remove_bots(data_list):
   return new_list
 
 def main(argv):
+  for filename in get_args._log_name:
+    print('================= Get IP info of ' + filename)
+    data_list = get_file_data_list(filename)
+    set_ipinfo_db(data_list)
+  db_write(get_args._ip_info, ipinfo_db)
+
   for filename in get_args._log_name:
     print('================= ANALYZE ' + filename)
     data_list = get_file_data_list(filename)
@@ -483,18 +523,6 @@ def main(argv):
       data_list = remove_in_list(data_list, False, 'ua', botname)
 
       print_doesnot_contain('BACKLINKS: ', data_list, False, 'origin', known_backlinks)    # print backlinks
-      continue
-
-    if get_args._google:
-      data_list = remove_bots(data_list)
-      data_list = keep_only(data_list, False, 'request', [ '.html', 'GET / ', 'GET /?' ])
-      unique_requests = keep_unique(data_list, False, 'request', [ '.html', 'GET / ', 'GET /?' ])
-      for unique_request in unique_requests: 
-        all = keep_only(data_list, True, 'request', [ unique_request ])
-        print('========= ' + unique_request + ': ' + str(len(all)))
-
-        for c in all:
-          print_ip_location(c['ip'])
       continue
 
     # Check following request return an error. if not, something's wrong
@@ -533,13 +561,8 @@ def main(argv):
       data_list = filter_errors(data_list)
       continue
 
-    # remove bots and potential bots
-    data_list = remove_in_list(data_list, False, 'ua', botname)
-    data_list = remove_in_list(data_list, False, 'ua', [ 'crawl', 'bot'])
-
     data_list = keep_only(data_list, False, 'request', [ '.html', 'GET / ', 'GET /?' ])
     unique_requests = keep_unique(data_list, False, 'request', [ '.html', 'GET / ', 'GET /?' ])
-    # ips_list = get_ips_list(data_list)
     for unique_request in unique_requests: 
       all = keep_only(data_list, True, 'request', [ unique_request ])
       print('========= ' + unique_request + ': ' + str(len(all)))
@@ -547,9 +570,6 @@ def main(argv):
       for c in all:
         print_ip_location(c['ip'])
 
-
-    #print_data_list(data_list)
-    #print_ips(data_list)
 
 
   print('=========================== crawler_french')
