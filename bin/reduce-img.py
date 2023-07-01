@@ -3,9 +3,10 @@ import getopt
 import os
 import shutil, subprocess
 from datetime import datetime
+import json
 
 # python -m pip install --upgrade pillow
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ExifTags
 
 _dirimg = 'C:/tmp/toreduce'
 _dirresized = 'C:/tmp/reduced'
@@ -60,6 +61,18 @@ def get_args(argv):
   if nb != 1:
     usage()
 
+def printExifTags(exif):
+  info = None
+  for key, val in exif.items():
+    if key in ExifTags.TAGS:
+      print(f'{key}:{ExifTags.TAGS[key]}:{val}')
+      if ExifTags.TAGS[key] == "ExifOffset":   # from https://github.com/python-pillow/Pillow/issues/5863
+        info = exif.get_ifd(key)
+  if info:
+    for key, val in info.items():
+      if key in ExifTags.TAGS:
+        print(f'{key}:{ExifTags.TAGS[key]}:{val}')
+
 def main(argv):
   get_args(argv)
   if not os.path.isdir(_dirresized):
@@ -95,15 +108,34 @@ def main(argv):
             f = 1920 / height
 
         try:
-          exif = image.info['exif']
           noexif = False
-          # 36867 comes from https://www.awaresystems.be/imaging/tiff/tifftags/privateifd/exif/datetimeoriginal.html
-          epoch = datetime.strptime(image._getexif()[36867], '%Y:%m:%d %H:%M:%S').timestamp()
+          exif = image.getexif()
+          # printExifTags(exif)
+          # 34665===ExifOffset  and  36867===DateTimeOriginal
+          info = exif.get_ifd(34665)
+          if (info):
+            dateTimeOriginal = info.get(36867)
+            if not dateTimeOriginal:
+              # no acquisition date in exif
+              # check if a json file exist (from a google photo for example)
+              try:
+                with open(_dirimg + '/' + jpg_filename + '.json') as json_file:
+                  jsonData = json.load(json_file)
+                  epoch = int(jsonData['photoTakenTime']['timestamp'])
+                  info[36867] = datetime.fromtimestamp(epoch).strftime('%Y:%m:%d %H:%M:%S')
+              except:
+                epoch = 0
+
+            else:
+              epoch = datetime.strptime(dateTimeOriginal, '%Y:%m:%d %H:%M:%S').timestamp()
+          else:
+            epoch = 0
+
         except:
           print('  no exif in ' + jpg_filename)
           noexif = True
           epoch = 0
-
+        
         if (_norafale!=0) and (epoch!=0) and (epoch-last_epoch < _norafale) and (epoch>=last_epoch):
           print('Skip as date acquisition too close')
           last_epoch = epoch
