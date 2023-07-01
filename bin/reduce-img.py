@@ -4,6 +4,7 @@ import os
 import shutil, subprocess
 from datetime import datetime
 import json
+from pyHelper import utilsHelper
 
 # python -m pip install --upgrade pillow
 from PIL import Image, ImageOps, ExifTags
@@ -80,17 +81,24 @@ def main(argv):
 
   nb = 0
   last_epoch = 0
-  for jpg_filename in os.listdir(_dirimg):
-    if jpg_filename.endswith('.jpg') or jpg_filename.endswith('.JPG'):
+  for filename in os.listdir(_dirimg):
+    if (filename.endswith('.gif') or filename.endswith('.GIF') or filename.endswith('.png') or filename.endswith('.PNG')):
+      nb = nb + 1
+      if os.path.isfile(_dirresized + '/' + filename):
+        print('  - ' + str(nb) + ' ' + filename)
+        continue
+      print('  + ' + str(nb) + ' ' + filename)
+      utilsHelper.copy_file(_dirimg + '/' + filename, _dirresized + '/' + filename, False)
+    elif filename.endswith('.jpg') or filename.endswith('.JPG') or filename.endswith('.jpeg') or filename.endswith('.JPEG'):
         nb = nb + 1
-        if os.path.isfile(_dirresized + '/' + jpg_filename):
-          print('  - ' + str(nb) + ' ' + jpg_filename)
+        if os.path.isfile(_dirresized + '/' + filename):
+          print('  - ' + str(nb) + ' ' + filename)
           continue
-        print('  + ' + str(nb) + ' ' + jpg_filename)
+        print('  + ' + str(nb) + ' ' + filename)
         try:
-          image = Image.open(_dirimg + '/' + jpg_filename)
+          image = Image.open(_dirimg + '/' + filename)
         except:
-          print('NO WAY to open ' + jpg_filename)
+          print('NO WAY to open ' + filename)
           continue
         width = image.width
         height = image.height
@@ -119,7 +127,7 @@ def main(argv):
               # no acquisition date in exif
               # check if a json file exist (from a google photo for example)
               try:
-                with open(_dirimg + '/' + jpg_filename + '.json') as json_file:
+                with open(_dirimg + '/' + filename + '.json') as json_file:
                   jsonData = json.load(json_file)
                   epoch = int(jsonData['photoTakenTime']['timestamp'])
                   info[36867] = datetime.fromtimestamp(epoch).strftime('%Y:%m:%d %H:%M:%S')
@@ -132,7 +140,7 @@ def main(argv):
             epoch = 0
 
         except:
-          print('  no exif in ' + jpg_filename)
+          print('  no exif in ' + filename)
           noexif = True
           epoch = 0
         
@@ -147,7 +155,7 @@ def main(argv):
           try:
             image = image.resize((int(width * f), int(height * f)))
           except:
-            print('NO WAY for resizing ' + jpg_filename)
+            print('NO WAY for resizing ' + filename)
             continue
 
         # from https://stackoverflow.com/questions/13872331/rotating-an-image-with-orientation-specified-in-exif-using-python-without-pil-in
@@ -155,11 +163,11 @@ def main(argv):
           image = ImageOps.exif_transpose(image)
 
         if (noexif):
-          image.save(_dirresized + '/' + jpg_filename, quality=80, progressive=True, optimize=True, subsampling='4:2:0')
+          image.save(_dirresized + '/' + filename, quality=80, progressive=True, optimize=True, subsampling='4:2:0')
         else:
-          image.save(_dirresized + '/' + jpg_filename, quality=80, progressive=True, optimize=True, subsampling='4:2:0', exif=exif)
+          image.save(_dirresized + '/' + filename, quality=80, progressive=True, optimize=True, subsampling='4:2:0', exif=exif)
         # update timestamp
-        shutil.copystat(_dirimg + '/' + jpg_filename, _dirresized + '/' + jpg_filename)
+        shutil.copystat(_dirimg + '/' + filename, _dirresized + '/' + filename)
 
   if _googlephoto:
     # resize video too
