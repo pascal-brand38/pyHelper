@@ -6,6 +6,8 @@ import sys, getopt, requests, time, math
 import json
 from urllib.request import urlopen
 
+# TODO: use https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/stopforumspam_365d.ipset
+
 known_backlinks = [
   '-',
   '188.165.53.185',   # is ovh
@@ -13,83 +15,35 @@ known_backlinks = [
   # 'yellowlab.tools', 'webpagetest.org', 'dareboost.com'
 ]
 
-botname = [
-  'Googlebot', 'Google-Site-Verification', 'Chrome-Lighthouse',
-  'ExaleadCloudView',   # from Dassault
-  'Qwantify/',
-  'FacebookBot',
-  'PetalBot',
-  'bingbot', 'BingLocalSearch',
-  'Applebot',
-  'SemrushBot',
-  'AhrefsBot',
-  'Yandex',
-  'IonCrawl',
-  'DuckDuckBot',  'DuckDuckGo-Favicons-Bot',
-  'Twitterbot',
-
-  # bad bot?
-  'Seekport Crawler',
-  'webprosbot',
-  'Mediatoolkitbot',
-  'CCBot',
-  'MJ12bot',
-  'zoominfobot',
-  't3versionsBot',
-  'archive.org_bot',
-  'DataForSeoBot',
-  'Internet-structure-research-project-bot',
-  'Barkrowler',
-  'pingbot',
-  'DotBot',
-  'GIDBot',
-  'Adsbot',
-  'linkfluence',
-  'MojeekBot',
-  'BLEXBot',
-  'SafeDNSBot',
-  'rc-crawler',
-  'SiteCheckerBotCrawler',
-  'MegaIndex.ru',
-  'LinkedInBot',
-  'intelx.io_bot',
-  'MauiBot',
-  'olbicobot',
-  'KomodiaBot',
-  'MSIECrawler',
-  'SEOlizer',
-  'Amazonbot',
-  'serpstatbot',
-  'bnf.fr_bot',
-  'rogerbot',
-  'Grover',
-  'redbot.org',
-  'https://google.com/bot.html'
+_static_botname = [     # TODO: remove this list
+  'ioncrawl',
+  # 'bot', 'crawl',
+  # 'qwant',              # TODO: qwantmobile is detected, whereas it should not
+  # 'google-site-verification',
+  # 'chrome-lighthouse',
+  # 'exaleadcloudview',
+  # 'binglocalsearch',
 ]
 
 def usage():
-  print('python bin/log-statistics.py [-h] [--credential-abuse-ipdb <credential>] [--ip <ip>] [--check-new-bots] <file.log>')
+  print('python bin/log-statistics.py [-h] [--credential-abuse-ipdb <credential>] [--ip <ip>] <file.log>')
   print(' --credential-abuse-ipdb <credential>: abuseipdb.com credential to filter spammer and crawler')
   print(' --ip-info <ip filename>: json db for ips info')
   print(' --ip <ip>: print every requests about this ip')
-  print(' --check-new-bots: print when a useragent may be a bot')
   print(' --backlinks: print backlinks')
   sys.exit(2)
 
 def get_args(argv):
   get_args._ip = ''
-  get_args._checknewbots = False
   get_args._checkerrors = False
   get_args._backlinks = False
   get_args._credential_abuse_ipdb = ''
   get_args._ip_info = ''
 
-  get_args._compute_abuseipdb = False
-  get_args._compute_location = True
   get_args._epoch = math.floor(time.time())
 
   try:
-    opts, args = getopt.getopt(argv,"h", ["ip=", "credential-abuse-ipdb=", "ip-info=", "check-new-bots", "check-errors", "backlinks"])
+    opts, args = getopt.getopt(argv,"h", ["ip=", "credential-abuse-ipdb=", "ip-info=", "check-errors", "backlinks"])
   except:
     usage()
 
@@ -98,17 +52,17 @@ def get_args(argv):
       usage()
     elif opt == '--ip':
       get_args._ip = arg
-    elif opt == '--check-new-bots':
-      get_args._checknewbots = True
     elif opt == '--check-errors':
       get_args._checkerrors = True
     elif opt == '--backlinks':
       get_args._backlinks = True
     elif opt == '--credential-abuse-ipdb':
       get_args._credential_abuse_ipdb = arg
-      get_args._compute_abuseipdb = True
     elif opt == '--ip-info':
       get_args._ip_info = arg
+
+  get_args._compute_abuseipdb = (get_args._credential_abuse_ipdb != '')
+  get_args._compute_location = True
 
   if len(args) < 1:
     usage()
@@ -173,12 +127,24 @@ def set_ipinfo_db(data_list):
       ipinfo_db[ip]['lua'] = []
     if not ua in ipinfo_db[ip]['lua']:
       ipinfo_db[ip]['lua'].append(ua)
+    
+    request = data['request']
+    if ('GET /robots.txt ' in request):
+      ipinfo_db[ip]['botfromaccess'] = True
+    for pattern in ['/wp-', '/wso', '/.env']:
+      if ('GET ' + pattern in request):
+        ipinfo_db[ip]['spamfromaccess'] = True
+        break
 
-    if not(ipinfo_db[ip].get('abuseipdb')):
+    if not(ipinfo_db[ip].get('stopforumspam')) and not is_abuse(data) and not is_crawler(data, False):
+      stopforumspam = compute_stopforumspam(ip)
+      if (stopforumspam):
+        ipinfo_db[ip]['stopforumspam'] = stopforumspam
+    
+    if not(ipinfo_db[ip].get('abuseipdb')) and not is_abuse(data) and not is_crawler(data, False):
       abuseipdb = compute_abuseipdb(ip)
       if (abuseipdb):
         ipinfo_db[ip]['abuseipdb'] = abuseipdb
-
 
 def get_ipinfo_db(data):
   # cf. https://docs.abuseipdb.com/?python#check-endpoint
@@ -211,14 +177,14 @@ def compute_abuseipdb(ip):
     url = 'https://api.abuseipdb.com/api/v2/check'
     querystring = {
         'ipAddress': ip,
-        'maxAgeInDays': '90'
+        'maxAgeInDays': '365'
     }
     headers = {
         'Accept': 'application/json',
         'Key': get_args._credential_abuse_ipdb
     }
 
-    print('.')
+    print(url + '?ipAddress=' + querystring['ipAddress'])
     try:
       response = requests.request(method='GET', url=url, headers=headers, params=querystring)
       decodedResponse = json.loads(response.text)
@@ -230,6 +196,20 @@ def compute_abuseipdb(ip):
   get_args._compute_abuseipdb = False
   return None
 
+def compute_stopforumspam(ip):
+  url = 'https://api.stopforumspam.org/api?ip=' + ip + '&json'
+  print(url)
+
+  try:
+    response = requests.request(method='GET', url=url)
+    decodedResponse = json.loads(response.text)
+    if (decodedResponse.get('success')):
+      return decodedResponse
+  except:
+    pass
+  
+  return None
+
 def get_ip_location(ip):
   location = ipinfo_db[ip].get('location')
   if not location:
@@ -239,77 +219,48 @@ def get_ip_location(ip):
   return location
 
 def is_abuse(data):
-  ip = data['ip']
-  abuseipdb = get_ipinfo_db(data).get('abuseipdb')
+  ip_info = get_ipinfo_db(data)
+  if (ip_info.get('spamfromaccess')):    # this ip access /wp- or something else to hack me
+    return True
 
-  result = abuseipdb and (abuseipdb['data']['abuseConfidenceScore'] > 30)
-  # print(result)
+  abuseipdb = ip_info.get('abuseipdb')
+  result = abuseipdb and (abuseipdb['data']['abuseConfidenceScore'] > 0)
+
+  if not result:
+    stopforumspam = get_ipinfo_db(data).get('stopforumspam')
+    if stopforumspam and (stopforumspam['success'] == 1) and (stopforumspam['ip']['appears'] > 0):
+      confidence = stopforumspam['ip']['confidence']
+      if type(confidence) == str:
+        confidence = float(confidence)
+      result = (confidence > 0)
+
   return result
 
-crawler_french = []
+request_outside_france = []
 crawler_by_name = []
-def is_crawler(data):
-  _static_botname = [     # TODO: remove this list
-    'bot', 'crawl',
-    'qwant',              # TODO: qwantmobile is detected, whereas it should not
-    'google-site-verification',
-    'chrome-lighthouse',
-    'exaleadcloudview',
-    'binglocalsearch',
-  ]
-
-  # TODO: check when accessing robots.txt
-  # in_list(False, data['request'], [ ' /robots.txt' ])
-
+def is_crawler(data, use_name=True):
   ip = data['ip']
-  verbose = (ip == '176.180.84.55') and False
   ip_info = get_ipinfo_db(data)
+  if (ip_info.get('botfromaccess')):    # this ip access /robots.txt
+    return True
+  
   abuseipdb = ip_info.get('abuseipdb')
-  result = (abuseipdb is not None) and (abuseipdb['data']['usageType'] == 'Search Engine Spider')
-  if verbose:
-    print('result = ', result)
-  # result = result or ('bot' in ip_info['ua']) or ('crawler' in ip_info['ua'])
-  if verbose:
-    print('result = ', result or ('bot' in ip_info['ua']) or ('crawler' in ip_info['ua']))
-  if not result:
+  # Whitelisted netblocks are typically owned by trusted entities, such as Google or Microsoft who may use them for search engine spiders
+  result = (abuseipdb is not None) and ((abuseipdb['data']['usageType'] == 'Search Engine Spider') or (abuseipdb['data']['isWhitelisted']))
+  result_using_name = False
+  if not result and use_name:
     for ua in ip_info['lua']:
       for bot in _static_botname:
         if bot in ua:
           result = True
-          if verbose:
-            print('Found')
+          result_using_name = True
           break
       if result:
         break
 
+  if result_using_name and (ip not in crawler_by_name):
+    crawler_by_name.append(ip)
 
-  # result = result or ('bot' in ip_info['ua']) or ('crawl' in ip_info['ua'])
-  result2 = in_list(False, data['ua'], botname, False)
-  if not result2:
-    result2 = in_list(False, data['ua'], [ 'crawl', 'bot'], False)
-  if not result2:
-    for bot in botname:
-      if bot in data['ua']:
-        result2 = bot
-        if verbose:
-          print('result2 found a bot: ', bot)
-        break
-  if verbose:
-    print('result2 = ', result2)
-
-  if (result and not result2):
-    if (abuseipdb and abuseipdb['data']['countryCode'] == 'FR') and (ip not in crawler_french):
-      if not 'qwant' in data['ua']:
-        crawler_french.append(ip)
-  if (not result and result2):
-    if (not is_abuse(data)) and ({ 'ip': ip, 'bot': result2 } not in crawler_by_name):
-      if verbose:
-        print('$$$$')
-      crawler_by_name.append({ 'ip': ip, 'bot': result2 })
-      # if (ip == '207.46.13.211'):
-      #   print(ipdb)
-
-  # print(result)
   return result
 
 def filter_ipinfo_db(callback, data_list):
@@ -453,6 +404,8 @@ def print_ip_location(ip):
   try:
     location = get_ip_location(ip)
     print(ip + ': ' + location['city'] + ', ' + location['region'] + ', ' + location['country'])
+    if (location['country'] != 'FR') and (ip not in request_outside_france):
+      request_outside_france.append(ip)
   except:
     print(ip + ': Cannot print locations')
 
@@ -468,30 +421,12 @@ def print_ip(data, data_list):
       print(data['ip'] + ': Cannot print location')
 
 
-# a bot is
-# - access robots.txt ==> remove all requests from this ip
-# - or is a know bot
-# - or ua contains crawl or bot
-
-def remove_bots(data_list):
-  new_list = []
-  ip_bot_list = []
-  for data in data_list:
-    if in_list(False, data['request'], [ ' /robots.txt' ]) or in_list(False, data['ua'], botname, False) or in_list(False, data['ua'], [ 'crawl', 'bot'], False):
-      ip_bot_list.append(data['ip'])
-
-  for data in data_list:
-    if not(data['ip'] in ip_bot_list):
-      new_list.append(data)
-
-  return new_list
-
 def main(argv):
   for filename in get_args._log_name:
     print('================= Get IP info of ' + filename)
     data_list = get_file_data_list(filename)
     set_ipinfo_db(data_list)
-  db_write(get_args._ip_info, ipinfo_db)
+    db_write(get_args._ip_info, ipinfo_db)
 
   for filename in get_args._log_name:
     print('================= ANALYZE ' + filename)
@@ -509,19 +444,10 @@ def main(argv):
       print_data_list(data_list)
       continue
 
-    if get_args._checknewbots:
-      print('Checking for potential bots not in list')
-      data_list = remove_in_list(data_list, False, 'ua', botname)
-      print_contain('POTENTIAL BOT (from name):         ', data_list, False, 'ua', False, [ 'crawl', 'bot'])        # print potential bot
-      print_contain('POTENTIAL BOT (access robots.txt): ', data_list, False, 'request', True, [ '/robots.txt'])    # print potential bot
-      continue
-
     if get_args._backlinks:
       print('Checking for backlinks')
       known_backlinks.append(data_list[0]['site'][4:])      # from www.example.com, extract example.com only
                                                             # this is to ignore when the page has been accessed using internal link
-      data_list = remove_in_list(data_list, False, 'ua', botname)
-
       print_doesnot_contain('BACKLINKS: ', data_list, False, 'origin', known_backlinks)    # print backlinks
       continue
 
@@ -572,10 +498,11 @@ def main(argv):
 
 
 
-  print('=========================== crawler_french')
-  print(crawler_french)
   print('=========================== crawler_by_name')
   print(crawler_by_name)
+  print('=========================== request_outside_france')
+  print(request_outside_france)
+  
 
 if __name__ == "__main__":
   get_args(sys.argv[1:])
@@ -584,5 +511,3 @@ if __name__ == "__main__":
   db_write(get_args._ip_info, ipinfo_db)
 
   #get_location('50.59.99.143')
-
-
