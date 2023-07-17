@@ -82,14 +82,17 @@ def main(argv):
   nb = 0
   last_epoch = 0
   for filename in os.listdir(_dirimg):
-    if (filename.endswith('.gif') or filename.endswith('.GIF') or filename.endswith('.png') or filename.endswith('.PNG')):
+    isJpg = (filename.endswith('.jpg') or filename.endswith('.JPG') or filename.endswith('.jpeg') or filename.endswith('.JPEG'))
+    isPng = (filename.endswith('.png') or filename.endswith('.PNG'))
+    isGif = (filename.endswith('.gif') or filename.endswith('.GIF'))
+    if isGif:
       nb = nb + 1
       if os.path.isfile(_dirresized + '/' + filename):
         print('  - ' + str(nb) + ' ' + filename)
         continue
       print('  + ' + str(nb) + ' ' + filename)
       utilsHelper.copy_file(_dirimg + '/' + filename, _dirresized + '/' + filename, False)
-    elif filename.endswith('.jpg') or filename.endswith('.JPG') or filename.endswith('.jpeg') or filename.endswith('.JPEG'):
+    elif isPng or isJpg:
         nb = nb + 1
         if os.path.isfile(_dirresized + '/' + filename):
           print('  - ' + str(nb) + ' ' + filename)
@@ -97,6 +100,8 @@ def main(argv):
         print('  + ' + str(nb) + ' ' + filename)
         try:
           image = Image.open(_dirimg + '/' + filename)
+          if (isPng):
+            image.load()      # https://stackoverflow.com/questions/48631908/python-extract-metadata-from-png
         except:
           print('NO WAY to open ' + filename)
           continue
@@ -121,21 +126,30 @@ def main(argv):
           # printExifTags(exif)
           # 34665===ExifOffset  and  36867===DateTimeOriginal
           info = exif.get_ifd(34665)
+          dateTimeOriginal = None
           if (info):
             dateTimeOriginal = info.get(36867)
-            if not dateTimeOriginal:
-              # no acquisition date in exif
-              # check if a json file exist (from a google photo for example)
-              try:
-                with open(_dirimg + '/' + filename + '.json') as json_file:
-                  jsonData = json.load(json_file)
-                  epoch = int(jsonData['photoTakenTime']['timestamp'])
-                  info[36867] = datetime.fromtimestamp(epoch).strftime('%Y:%m:%d %H:%M:%S')
-              except:
-                epoch = 0
+          if not dateTimeOriginal and isPng:
+            dateTimeOriginal = image.info.get('Creation Time')
+          
+          if not dateTimeOriginal:
+            # no acquisition date in exif nor png metadata
+            # check if a json file exist (from a google photo for example)
+            try:
+              with open(_dirimg + '/' + filename + '.json') as json_file:
+                jsonData = json.load(json_file)
+                epoch = int(jsonData['photoTakenTime']['timestamp'])
+                dateTimeOriginal = datetime.fromtimestamp(epoch).strftime('%Y:%m:%d %H:%M:%S')
+            except:
+              pass
 
-            else:
-              epoch = datetime.strptime(dateTimeOriginal, '%Y:%m:%d %H:%M:%S').timestamp()
+          
+
+          if dateTimeOriginal:
+            # set in exif + png metadata
+            if info:
+              info[36867] = dateTimeOriginal
+            epoch = datetime.strptime(dateTimeOriginal, '%Y:%m:%d %H:%M:%S').timestamp()
           else:
             epoch = 0
 
@@ -163,11 +177,23 @@ def main(argv):
           image = ImageOps.exif_transpose(image)
 
         if (noexif):
-          image.save(_dirresized + '/' + filename, quality=80, progressive=True, optimize=True, subsampling='4:2:0')
+          if (isPng):
+            image.save(_dirresized + '/' + filename, optimize=True)
+          if (isJpg):
+            image.save(_dirresized + '/' + filename, quality=80, progressive=True, optimize=True, subsampling='4:2:0')
         else:
-          image.save(_dirresized + '/' + filename, quality=80, progressive=True, optimize=True, subsampling='4:2:0', exif=exif)
+          if (isPng):
+            image.save(_dirresized + '/' + filename, optimize=True, exif=exif)
+          if (isJpg):
+            image.save(_dirresized + '/' + filename, quality=80, progressive=True, optimize=True, subsampling='4:2:0', exif=exif)
+
         # update timestamp
         shutil.copystat(_dirimg + '/' + filename, _dirresized + '/' + filename)
+        #os.stat(_dirresized + '/' + filename).st_ctime(dateTimeOriginal)
+        if (epoch != 0):
+          os.utime(_dirresized + '/' + filename, (epoch, epoch))
+
+
 
   if _googlephoto:
     # resize video too
