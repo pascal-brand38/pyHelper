@@ -208,7 +208,7 @@ def main(argv):
           'ffmpeg',
           '-i', _dirimg + '/'+mp4_filename,
           '-map_metadata', '0',   # copy video media properties - keep this option right after the -i option
-          '-vf', 'scale=640:-1',
+          '-vf', 'scale=1024:-1',
           _dirresized + '/' + mp4_filename, 
           '-loglevel', 'quiet'
           ])
