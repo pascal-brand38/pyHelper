@@ -15,6 +15,7 @@ from PIL import Image
 
 import re
 import os
+import json
 
 
 # look at libtidy options at http://api.html-tidy.org/tidy/tidylib_api_next/tidy_quickref.html
@@ -103,39 +104,28 @@ js_minify._init = False
 # create_sprites
 # Sprite generation, as png and webp, from icons
 #
-# descriptionFileName:
-#   filename of a text file describing how the sprite is built.
-#   Each line of the text file contain:
-#     filename.png horizontal-position vertical-position icon-short-name <before|after>
-#
-# rootDirIcons:
-#   full path of the directory where are contained all png icon files that are specified
-#   in descriptionFileName
-#
-# baseOutputName:
-#   <baseOutputName>.png and <baseOutputName>.webp are created, containing the sprite
-#
-# 
 # TODO: comments
-# sprite generation
-# uses a text file
-def create_sprites(descriptionFileName, rootDirIcons, spriteOutputName, cssOutputName):
-  all = []
-  with open(descriptionFileName) as fsprite:
-    for line in fsprite.readlines ():
-      if line.startswith('#') or line.isspace():
-        continue
-      data = line.split()
-      all.append(data)
+def create_sprites(spriteJsonFilename):
+  with open(spriteJsonFilename, encoding='utf-8') as file:
+    try:
+      json_db = json.load(file)
+    except ValueError as err:
+      print(err)
+      print('Wrong json at ' + spriteJsonFilename + ' - Exit')
+      exit(1)
+
+  rootDirIcons = os.path.dirname(spriteJsonFilename)
+  icons = json_db['icons'].keys()
 
   sprite_width = 0
   sprite_height = 0
-
   images = []
-  for an_image in all:
-    name = an_image[0]
-    pos_w = int(an_image[1])
-    pos_h = int(an_image[2])
+
+  for icon in icons:
+    desc = json_db['icons'][icon]
+    name = desc['filename']
+    pos_w = int(desc['posHor'])
+    pos_h = int(desc['posVer'])
     i = Image.open(rootDirIcons + '/' + name)
     if sprite_width < pos_w + i.width:
       sprite_width = pos_w + i.width
@@ -148,27 +138,35 @@ def create_sprites(descriptionFileName, rootDirIcons, spriteOutputName, cssOutpu
     size=(sprite_width, sprite_height),
     color=(0,0,0,0))  # fully transparent
 
-  for count, i in enumerate(images):
-    pos_w = int(all[count][1])
-    pos_h = int(all[count][2])
+  index = 0
+  for icon in icons:
+    i = images[index]
+
+    desc = json_db['icons'][icon]
+    name = desc['filename']
+    pos_w = int(desc['posHor'])
+    pos_h = int(desc['posVer'])
+
     sprite.paste(i, (pos_w, pos_h))
-    print(all[count][3] + '::' + all[count][4] + ' {'
-      + ' background-position: -' + all[count][1] + 'px -' + all[count][2] + 'px;'
+    spanPosition = desc.get('spanPosition', 'before')
+    print(icon + '::' + spanPosition + ' {'
+      + ' background-position: -' + str(desc['posHor']) + 'px -' + str(desc['posVer']) + 'px;'
       + ' width: ' + str(i.width) + 'px;'
       + ' height: ' + str(i.height) + 'px;'
       + ' }')
-
-  png_result = spriteOutputName + '.png'
+    index = index + 1
+  
+  png_result = rootDirIcons + '/' + json_db['spriteOutputBaseName'] + '.png'
   print('Save ' +  png_result)
   sprite.save(png_result, optimize=True)
   error = os.system('optipng ' + png_result)
   if error != 0:
-    return -1   # an error
+    exit(1)
 
   # save as webp
   # https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html#webp
   # method=6 provides a better size, but is slow
-  webp_result = spriteOutputName + '.webp'
+  webp_result = rootDirIcons + '/' + json_db['spriteOutputBaseName'] + '.webp'
   print('Save ' +  webp_result)
   sprite.save(webp_result, method=6, quality=100, lossless=True)
 
